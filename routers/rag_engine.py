@@ -240,8 +240,6 @@ async def checkKelengkapanBerkas(payload: KliamBpjsIn, db: Session = Depends(get
                 }
             }
         )
-
-    
     except SQLAlchemyError as e:
         # db.rollback()
         return handleError(code=500, message=f"Kesalahan dalam memproses data. {str(e)}", data=None)
@@ -249,94 +247,7 @@ async def checkKelengkapanBerkas(payload: KliamBpjsIn, db: Session = Depends(get
         return handleError(code=500, message=str(e))
 
 
-
-@router.post("/check-kelengkapan-berkas", tags=["RAG Engine Query"], summary="Check kelengkapan berkas claim bpjs", response_model=ResponseModel[KliamBpjsOut], description="Endpoint ini digunakan untuk mengecek kelengkapan berkas claim bpjs")
-async def checkKelengkapanBerkas(payload: KliamBpjsIn, db: Session = Depends(get_db)):
-    try:
-        query_text_from_payload = ""
-        response = ""
-        if payload.result_checkup == '' or payload.result_checkup is None:
-            return handleError(code=422, message='Result Checkup tidak boleh kosong', data=None)
-
-        query_text_from_payload = payload.result_checkup
-        # 1. Retrieve relevant context from RAG index
-        query_text = f"Analyze and summarize the following document : \n\n{query_text_from_payload}"
-        relevant_chunks = rag_engine.query(query_text, top_k=7)
-        if not relevant_chunks:
-            return handleError(code=404, message="Could not find relevant documents in the index. The index might be empty. Please try indexing documents first.")
-
-        contextQuery = "\n\n---".join([chunk['text'] for chunk in relevant_chunks])
-
-        # Group relevant chunks by source file
-        source_map = defaultdict(list)
-        for chunk in relevant_chunks:
-            source_map[chunk['source']].append({
-                "chunk_id": chunk['chunk_id'],
-                "content": chunk['text']
-            })
-
-        # Format for response
-        source_documents = []
-        for filename, chunks in source_map.items():
-            source_documents.append({
-                "filename": filename,
-                "relevant_chunks_count": len(chunks),
-                "documents": chunks
-            })
-
-        query_text_from_payload = truncate_text(query_text_from_payload)
-        contextQuery = truncate_text(contextQuery)
-
-        # 2. Augment the prompt and generate the final response
-        prompt = rag_engine.generatePromptVerifikasiKlaimBpjs(query_text=query_text_from_payload)
-        system_intruction = rag_engine.generateSystemIntructions(context=contextQuery)
-
-        response = await generate(prompt=prompt, system_instruction=system_intruction, response_mime_type="application/json", response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS, temperature=0.0, seed=len(prompt))
-
-        if not response or not getattr(response, "text", "").strip():
-            response = await generate(prompt=prompt, system_instruction=system_intruction, response_mime_type="application/json", response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS, temperature=0.0, seed=len(prompt))
-
-            if not response or not getattr(response, "text", "").strip():
-                return handleError(code=500, message="Gagal menganalisis data.", data=None)
-
-        prompt_tokens = 0
-        candidates_tokens = 0
-        total_tokens = 0
-
-        if hasattr(response, 'usage_metadata'):
-            prompt_tokens = response.usage_metadata.prompt_token_count
-            candidates_tokens = response.usage_metadata.candidates_token_count
-            total_tokens = response.usage_metadata.total_token_count
-        
-        final_answer = response.text if hasattr(response, 'text') else str(response)
-
-        medicalScribeEntry = KlaimBpjs(
-            document_name="Direct Input",
-            document_extraction=query_text_from_payload,
-            retrieval_content_query=json.dumps(source_documents),
-            prompt=prompt,
-            response=final_answer,
-            token_request=prompt_tokens,
-            token_response=candidates_tokens,
-            token_counts=total_tokens,
-            timestamp=datetime.now()
-        )
-        db.add(medicalScribeEntry)
-        db.commit()
-        
-        return handleResponse(code=200, message='OK', data=json.loads(final_answer))
-    except SQLAlchemyError as e:
-        db.rollback()
-        return handleError(code=500, message=f"Kesalahan dalam memproses data. {str(e)}", data=None)
-    except Exception as e:
-        return handleError(code=500, message=str(e))
-
-
-@router.get("/health")
-async def health_check():
-    return {"status": "OK"}
-
-@router.post("/check-kelengkapan-berkas-document", tags=["RAG Engine Query"], response_model=ResponseModel[KliamBpjsOut])
+@router.post("/check-kelengkapan-berkas-document-baru", tags=["RAG Engine Query"], response_model=ResponseModel[KliamBpjsOut])
 async def check_claim(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
@@ -396,51 +307,200 @@ async def check_claim(
         prompt = rag_engine.generatePromptVerifikasiKlaimBpjs(query_text=query_text_from_file)
         system_intruction = rag_engine.generateSystemIntructions(context=contextQuery)
 
-        response = await generate(prompt=prompt, system_instruction=system_intruction, response_mime_type="application/json", response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS, temperature=0.0, seed=len(prompt))
-
-        if not response or not getattr(response, "text", "").strip():
-
-            response = await generate(prompt=prompt, system_instruction=system_intruction, response_mime_type="application/json", response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS, temperature=0.0, seed=len(prompt))
-
-            if not response or not getattr(response, "text", "").strip():
-                return handleError(code=500, message="Gagal menganalisis data.", data=None)
+        # 3. Generate Answer
+        response = await generate_ollama(prompt=prompt, system_instruction=system_intruction, response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS,temperature=0.1, seed=len(prompt))
         
-        prompt_tokens = 0
-        candidates_tokens = 0
-        total_tokens = 0
+        final_answer = response["message"]["content"]
+        parsed = json.loads(final_answer)             
 
-        if hasattr(response, 'usage_metadata'):
-            prompt_tokens = response.usage_metadata.prompt_token_count
-            candidates_tokens = response.usage_metadata.candidates_token_count
-            total_tokens = response.usage_metadata.total_token_count
-        
-        final_answer = response.text if hasattr(response, 'text') else str(response)
-
-        medicalScribeEntry = KlaimBpjs(
-            document_name=file.filename,
-            document_extraction=query_text_from_file,
-            retrieval_content_query=json.dumps(source_documents),
-            prompt=prompt,
-            response=final_answer,
-            token_request=prompt_tokens,
-            token_response=candidates_tokens,
-            token_counts=total_tokens,
-            timestamp=datetime.now()
-        )
-        db.add(medicalScribeEntry)
-        db.commit()
-
-        return handleResponse(
-            data=json.loads(final_answer),
-            message="Claim check completed successfully."
-        )
-
+        return handleResponse(parsed)
     except Exception as e:
         return handleError(code=500, message=f"An internal error occurred: {str(e)}")
 
 
+# @router.post("/check-kelengkapan-berkas", tags=["RAG Engine Query"], summary="Check kelengkapan berkas claim bpjs", response_model=ResponseModel[KliamBpjsOut], description="Endpoint ini digunakan untuk mengecek kelengkapan berkas claim bpjs")
+# async def checkKelengkapanBerkas(payload: KliamBpjsIn, db: Session = Depends(get_db)):
+#     try:
+#         query_text_from_payload = ""
+#         response = ""
+#         if payload.result_checkup == '' or payload.result_checkup is None:
+#             return handleError(code=422, message='Result Checkup tidak boleh kosong', data=None)
+
+#         query_text_from_payload = payload.result_checkup
+#         # 1. Retrieve relevant context from RAG index
+#         query_text = f"Analyze and summarize the following document : \n\n{query_text_from_payload}"
+#         relevant_chunks = rag_engine.query(query_text, top_k=7)
+#         if not relevant_chunks:
+#             return handleError(code=404, message="Could not find relevant documents in the index. The index might be empty. Please try indexing documents first.")
+
+#         contextQuery = "\n\n---".join([chunk['text'] for chunk in relevant_chunks])
+
+#         # Group relevant chunks by source file
+#         source_map = defaultdict(list)
+#         for chunk in relevant_chunks:
+#             source_map[chunk['source']].append({
+#                 "chunk_id": chunk['chunk_id'],
+#                 "content": chunk['text']
+#             })
+
+#         # Format for response
+#         source_documents = []
+#         for filename, chunks in source_map.items():
+#             source_documents.append({
+#                 "filename": filename,
+#                 "relevant_chunks_count": len(chunks),
+#                 "documents": chunks
+#             })
+
+#         query_text_from_payload = truncate_text(query_text_from_payload)
+#         contextQuery = truncate_text(contextQuery)
+
+#         # 2. Augment the prompt and generate the final response
+#         prompt = rag_engine.generatePromptVerifikasiKlaimBpjs(query_text=query_text_from_payload)
+#         system_intruction = rag_engine.generateSystemIntructions(context=contextQuery)
+
+#         response = await generate(prompt=prompt, system_instruction=system_intruction, response_mime_type="application/json", response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS, temperature=0.0, seed=len(prompt))
+
+#         if not response or not getattr(response, "text", "").strip():
+#             response = await generate(prompt=prompt, system_instruction=system_intruction, response_mime_type="application/json", response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS, temperature=0.0, seed=len(prompt))
+
+#             if not response or not getattr(response, "text", "").strip():
+#                 return handleError(code=500, message="Gagal menganalisis data.", data=None)
+
+#         prompt_tokens = 0
+#         candidates_tokens = 0
+#         total_tokens = 0
+
+#         if hasattr(response, 'usage_metadata'):
+#             prompt_tokens = response.usage_metadata.prompt_token_count
+#             candidates_tokens = response.usage_metadata.candidates_token_count
+#             total_tokens = response.usage_metadata.total_token_count
+        
+#         final_answer = response.text if hasattr(response, 'text') else str(response)
+
+#         medicalScribeEntry = KlaimBpjs(
+#             document_name="Direct Input",
+#             document_extraction=query_text_from_payload,
+#             retrieval_content_query=json.dumps(source_documents),
+#             prompt=prompt,
+#             response=final_answer,
+#             token_request=prompt_tokens,
+#             token_response=candidates_tokens,
+#             token_counts=total_tokens,
+#             timestamp=datetime.now()
+#         )
+#         db.add(medicalScribeEntry)
+#         db.commit()
+        
+#         return handleResponse(code=200, message='OK', data=json.loads(final_answer))
+#     except SQLAlchemyError as e:
+#         db.rollback()
+#         return handleError(code=500, message=f"Kesalahan dalam memproses data. {str(e)}", data=None)
+#     except Exception as e:
+#         return handleError(code=500, message=str(e))
 
 
+# @router.post("/check-kelengkapan-berkas-document", tags=["RAG Engine Query"], response_model=ResponseModel[KliamBpjsOut])
+# async def check_claim(
+#     file: UploadFile = File(...),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Performs a check on a claim by querying the RAG engine.
+#     You can provide upload a `file` (PDF) to be analyzed.
+#     """
+#     if not file:
+#         return handleError(code=422, message="Please provide either a text query or a file.")
+
+#     try:
+#         query_text_from_file = ""
+#         query_text = ""
+#         if file:
+#             if file.content_type != 'application/pdf':
+#                 return handleError(code=422, message="Invalid file type. Only PDF is supported.")
+            
+#             temp_file_path = os.path.join(TEMP_UPLOAD_PATH, file.filename)
+#             with open(temp_file_path, "wb") as buffer:
+#                 shutil.copyfileobj(file.file, buffer)
+            
+#             query_text_from_file = rag_engine._process_pdf(temp_file_path)
+            
+#             query_text = f"Analyze and summarize the following document : \n\n{query_text_from_file}"
+            
+#             os.remove(temp_file_path)
+
+#         # 1. Retrieve relevant context from RAG index
+#         relevant_chunks = rag_engine.query(query_text, top_k=7)
+#         if not relevant_chunks:
+#             return handleError(code=404, message="Could not find relevant documents in the index. The index might be empty. Please try indexing documents first.")
+
+#         contextQuery = "\n\n---".join([chunk['text'] for chunk in relevant_chunks])
+        
+#         # Group relevant chunks by source file
+#         source_map = defaultdict(list)
+#         for chunk in relevant_chunks:
+#             source_map[chunk['source']].append({
+#                 "chunk_id": chunk['chunk_id'],
+#                 "content": chunk['text']
+#             })
+
+#         # Format for response
+#         source_documents = []
+#         for filename, chunks in source_map.items():
+#             source_documents.append({
+#                 "filename": filename,
+#                 "relevant_chunks_count": len(chunks),
+#                 "documents": chunks
+#             })
+
+#         query_text_from_file = truncate_text(query_text_from_file)
+#         contextQuery = truncate_text(contextQuery)
+
+#         # 2. Augment the prompt and generate the final response
+#         prompt = rag_engine.generatePromptVerifikasiKlaimBpjs(query_text=query_text_from_file)
+#         system_intruction = rag_engine.generateSystemIntructions(context=contextQuery)
+
+#         response = await generate(prompt=prompt, system_instruction=system_intruction, response_mime_type="application/json", response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS, temperature=0.0, seed=len(prompt))
+
+#         if not response or not getattr(response, "text", "").strip():
+
+#             response = await generate(prompt=prompt, system_instruction=system_intruction, response_mime_type="application/json", response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS, temperature=0.0, seed=len(prompt))
+
+#             if not response or not getattr(response, "text", "").strip():
+#                 return handleError(code=500, message="Gagal menganalisis data.", data=None)
+        
+#         prompt_tokens = 0
+#         candidates_tokens = 0
+#         total_tokens = 0
+
+#         if hasattr(response, 'usage_metadata'):
+#             prompt_tokens = response.usage_metadata.prompt_token_count
+#             candidates_tokens = response.usage_metadata.candidates_token_count
+#             total_tokens = response.usage_metadata.total_token_count
+        
+#         final_answer = response.text if hasattr(response, 'text') else str(response)
+
+#         medicalScribeEntry = KlaimBpjs(
+#             document_name=file.filename,
+#             document_extraction=query_text_from_file,
+#             retrieval_content_query=json.dumps(source_documents),
+#             prompt=prompt,
+#             response=final_answer,
+#             token_request=prompt_tokens,
+#             token_response=candidates_tokens,
+#             token_counts=total_tokens,
+#             timestamp=datetime.now()
+#         )
+#         db.add(medicalScribeEntry)
+#         db.commit()
+
+#         return handleResponse(
+#             data=json.loads(final_answer),
+#             message="Claim check completed successfully."
+#         )
+
+#     except Exception as e:
+#         return handleError(code=500, message=f"An internal error occurred: {str(e)}")
 
 
 @router.post("/test-db-commit")

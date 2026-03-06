@@ -6,7 +6,6 @@ logs/*.log
 documents/*
 !.gitkeep
 /dataStore
-/database
 .DS_Store
 databases
 /Knowledge
