@@ -9,3 +9,4 @@ documents/*
 .DS_Store
 databases
 /Knowledge
+/venv
