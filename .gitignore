@@ -1,0 +1,12 @@
+__pycache__
+env
+.env
+keys
+logs/*.log
+documents/*
+!.gitkeep
+/dataStore
+/database
+.DS_Store
+databases
+/Knowledge
