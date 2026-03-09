@@ -174,7 +174,7 @@ async def delete_chunk_by_id(file_name: str, chunk_id: int):
     
 
 
-@router.post("/check-kelengkapan-berkas-baru", tags=["RAG Engine Query"], summary="Check kelengkapan berkas claim bpjs", description="Endpoint ini digunakan untuk mengecek kelengkapan berkas claim bpjs")
+@router.post("/check-kelengkapan-berkas", tags=["RAG Engine Query"], summary="Check kelengkapan berkas claim bpjs", description="Endpoint ini digunakan untuk mengecek kelengkapan berkas claim bpjs")
 async def checkKelengkapanBerkas(payload: KliamBpjsIn, db: Session = Depends(get_db)):
     try:
         query_text_from_payload = ""
@@ -247,7 +247,7 @@ async def checkKelengkapanBerkas(payload: KliamBpjsIn, db: Session = Depends(get
         return handleError(code=500, message=str(e))
 
 
-@router.post("/check-kelengkapan-berkas-document-baru", tags=["RAG Engine Query"], response_model=ResponseModel[KliamBpjsOut])
+@router.post("/check-kelengkapan-berkas-document", tags=["RAG Engine Query"], response_model=ResponseModel[KliamBpjsOut])
 async def check_claim(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
@@ -309,9 +309,24 @@ async def check_claim(
 
         # 3. Generate Answer
         response = await generate_ollama(prompt=prompt, system_instruction=system_intruction, response_schema=RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS,temperature=0.1, seed=len(prompt))
-        
         final_answer = response["message"]["content"]
-        parsed = json.loads(final_answer)             
+        parsed = json.loads(final_answer)
+
+        # Store to the Databse
+        medicalScribeEntry  = KlaimBpjs(
+            document_name="Direct Input",
+            document_extraction=query_text_from_file,
+            retrieval_content_query=json.dumps(source_documents),
+            prompt=prompt,
+            response=json.dumps(parsed),
+            token_request=token_request,
+            token_response=token_response,
+            token_counts=token_counts,
+            timestamp=datetime.now()
+        )
+        db.add(medicalScribeEntry)
+        db.commit()
+        db.refresh(medicalScribeEntry)       
 
         return handleResponse(parsed)
     except Exception as e:
