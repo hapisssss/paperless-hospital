@@ -312,6 +312,12 @@ async def check_claim(
         final_answer = response["message"]["content"]
         parsed = json.loads(final_answer)
 
+
+        # Get Token
+        token_request = response.get("prompt_eval_count", 0)
+        token_response = response.get("eval_count", 0)
+        token_counts = token_request + token_response
+
         # Store to the Databse
         medicalScribeEntry  = KlaimBpjs(
             document_name="Direct Input",
