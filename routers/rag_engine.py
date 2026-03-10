@@ -277,9 +277,9 @@ async def check_claim(
             os.remove(temp_file_path)
 
         # 1. Retrieve relevant context from RAG index
-        relevant_chunks = rag_engine.query(query_text, top_k=7)
+        relevant_chunks = rag_engine.query(query_text, top_k=7, similarity_threshold=0.7)
         if not relevant_chunks:
-            return handleError(code=404, message="Could not find relevant documents in the index. The index might be empty. Please try indexing documents first.")
+            return handleError(code=404, message="Could not find relevant documents in the index ot there no have relevant document. The index might be empty. Please try indexing documents first.")
 
         contextQuery = "\n\n---".join([chunk['text'] for chunk in relevant_chunks])
         
@@ -569,6 +569,7 @@ async def delete_all_index():
     Deletes ALL indexed documents from the RAG engine.
     """
     try:
+        
         result = rag_engine.delete_all()
         return handleResponse(data=result, message="All indexes deleted successfully.")
     except Exception as e:

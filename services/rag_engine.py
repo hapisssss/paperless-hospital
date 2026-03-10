@@ -36,7 +36,8 @@ class RagEngine:
         
         # Initialize ChromaDB client
         self.chroma_client = chromadb.PersistentClient(path=db_path)
-        self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
+        # self.collection = self.chroma_client.get_or_create_collection(name=collection_name)
+        self.collection = self.chroma_client.get_or_create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
 
     def _chunk_text(self, text: str, chunk_size: int = 1000, chunk_overlap: int = 100) -> List[str]:
         """Splits text into overlapping chunks, respecting word boundaries."""
@@ -389,21 +390,56 @@ class RagEngine:
             logger.error(f"Failed to delete chunk with ID '{chunk_id_str}' from ChromaDB: {e}")
             raise Exception(f"An error occurred during chunk deletion: {str(e)}")
 
-    def query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """Queries the RAG engine using ChromaDB to get relevant context."""
+    # def query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    #     """Queries the RAG engine using ChromaDB to get relevant context."""
+    #     if self.collection.count() == 0:
+    #         logger.warning("ChromaDB collection is empty. Cannot perform query.")
+    #         return []
+
+    #     try:
+    #         # query_result = client.models.embed_content(
+    #         #     model=f"{self.embedding_model}",
+    #         #     contents=[query_text],
+    #         #     config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY")
+    #         # )
+    #         # query_embedding = query_result.embeddings[0].values
+    #         query_embedding = self._embed_with_ollama([query_text])[0]
+
+    #     except Exception as e:
+    #         logger.error(f"Failed to generate query embedding: {e}")
+    #         raise
+
+    #     try:
+    #         results = self.collection.query(
+    #             query_embeddings=[query_embedding],
+    #             n_results=min(top_k, self.collection.count()) # Ensure n_results is not greater than the number of items
+    #         )
+    #     except Exception as e:
+    #         logger.error(f"Failed to query ChromaDB: {e}")
+    #         return []
+
+    #     similar_chunks = []
+    #     if results and results['documents']:
+    #         documents = results['documents'][0]
+    #         metadatas = results['metadatas'][0]
+    #         for doc, meta in zip(documents, metadatas):
+    #             similar_chunks.append({
+    #                 'text': doc,
+    #                 'source': meta.get('source', 'unknown'),
+    #                 'chunk_id': meta.get('chunk_id', 'N/A') # Add chunk_id
+    #             })
+        
+    #     logger.info(f"Found {len(similar_chunks)} relevant chunks from ChromaDB.")
+    #     return similar_chunks
+
+    def query(self, query_text: str, top_k: int = 10, similarity_threshold: float = 0.7 ) -> List[Dict[str, Any]]:
+        """Queries the RAG engine using ChromaDB with similarity threshold."""
         if self.collection.count() == 0:
             logger.warning("ChromaDB collection is empty. Cannot perform query.")
             return []
 
         try:
-            # query_result = client.models.embed_content(
-            #     model=f"{self.embedding_model}",
-            #     contents=[query_text],
-            #     config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY")
-            # )
-            # query_embedding = query_result.embeddings[0].values
             query_embedding = self._embed_with_ollama([query_text])[0]
-
         except Exception as e:
             logger.error(f"Failed to generate query embedding: {e}")
             raise
@@ -411,24 +447,33 @@ class RagEngine:
         try:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=min(top_k, self.collection.count()) # Ensure n_results is not greater than the number of items
+                n_results=min(top_k, self.collection.count())
             )
         except Exception as e:
             logger.error(f"Failed to query ChromaDB: {e}")
             return []
 
         similar_chunks = []
+
         if results and results['documents']:
             documents = results['documents'][0]
             metadatas = results['metadatas'][0]
-            for doc, meta in zip(documents, metadatas):
-                similar_chunks.append({
-                    'text': doc,
-                    'source': meta.get('source', 'unknown'),
-                    'chunk_id': meta.get('chunk_id', 'N/A') # Add chunk_id
-                })
-        
-        logger.info(f"Found {len(similar_chunks)} relevant chunks from ChromaDB.")
+            distances = results['distances'][0]
+
+            for doc, meta, dist in zip(documents, metadatas, distances):
+                similarity = 1 - dist  # convert distance -> similarity
+                if similarity >= similarity_threshold:
+                    similar_chunks.append({
+                        "text": doc,
+                        "source": meta.get("source", "unknown"),
+                        "chunk_id": meta.get("chunk_id", "N/A"),
+                        "similarity": similarity
+                    })
+
+        logger.info(
+            f"Found {len(similar_chunks)} chunks above similarity threshold {similarity_threshold}"
+        )
+
         return similar_chunks
 
     def generatePromptVerifikasiKlaimBpjs(self, query_text: str = ""):

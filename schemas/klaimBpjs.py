@@ -1,6 +1,96 @@
 from pydantic import BaseModel, Field
 from typing import Dict, List
 
+# RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS = {
+#     "type": "object",
+#     "properties": {
+#         "complete": {
+#             "type": "array",
+#             "description": "Administrasi atau dokumen klaim yang lengkap",
+#             "items": {
+#                 "type": "string",
+#                 "description": "Deskripsi atau nama administrasi atau dokumen klaim yang lengkap"
+#             }
+#         },
+#         "incomplete": {
+#             "type": "object",
+#             "properties": {
+#                 "analisa_aturan_bak":{
+#                     "type": "array",
+#                     "description": "Administrasi dokumen klaim terkait berita acara kesepakatan bpjs yang tidak lengkap",
+#                     "items": {
+#                         "type": "string",
+#                         "description": "Deskripsi atau nama administrasi dokumen klaim terkait berita acara kesepakatan bpjs yang tidak lengkap"
+#                     }
+#                 },
+#                 "analisa_aturan_klinis":{
+#                     "type": "array",
+#                     "description": "Administrasi dokumen klaim terkait aturan klinis yang tidak lengkap",
+#                     "items": {
+#                         "type": "string",
+#                         "description": "Deskripsi atau nama administrasi dokumen klaim terkait aturan klinis yang tidak lengkap"
+#                     }
+#                 },
+#                 "analisa_permenkes":{
+#                     "type": "array",
+#                     "description": "Administrasi dokumen klaim terkait peraturan mentri kesehatan yang tidak lengkap",
+#                     "items": {
+#                         "type": "string",
+#                         "description": "Deskripsi atau nama administrasi dokumen klaim terkait peraturan mentri kesehatan yang tidak lengkap"
+#                     }
+#                 },
+#                 "analisa_aturan_coding_medis":{
+#                     "type": "array",
+#                     "description": "Administrasi dokumen klaim terkait aturan coding medis yang tidak lengkap",
+#                     "items": {
+#                         "type": "string",
+#                         "description": "Deskripsi atau nama administrasi dokumen klaim terkait aturan coding medis yang tidak lengkap"
+#                     }
+#                 }
+#             },
+#             "required": ["analisa_aturan_bak", "analisa_aturan_klinis", "analisa_permenkes", "analisa_aturan_coding_medis"]
+#         },
+#         "improvement_suggestions": {
+#             "type": "object",
+#             "properties": {
+#                 "analisa_aturan_bak":{
+#                     "type": "array",
+#                     "description": "Saran-saran atau berupa perintah perbaikan sdministrasi dokumen klaim terkait berita acara kesepakatan bpjs yang tidak lengkap",
+#                     "items": {
+#                         "type": "string",
+#                         "description": "Deskripsi saran atau perintah perbaikan administrasi atau dokumen klaim terkait berita acara kesepakatan bpjs yang tidak lengkap"
+#                     }
+#                 },
+#                 "analisa_aturan_klinis":{
+#                     "type": "array",
+#                     "description": "Saran-saran atau berupa perintah perbaikan sdministrasi dokumen klaim terkait aturan klinis yang tidak lengkap",
+#                     "items": {
+#                         "type": "string",
+#                         "description": "Deskripsi saran atau perintah perbaikan administrasi atau dokumen klaim terkait aturan klinis yang tidak lengkap"
+#                     }
+#                 },
+#                 "analisa_permenkes":{
+#                     "type": "array",
+#                     "description": "Saran-saran atau berupa perintah perbaikan sdministrasi dokumen klaim terkait peraturan mentri kesehatan yang tidak lengkap",
+#                     "items": {
+#                         "type": "string",
+#                         "description": "Deskripsi saran atau perintah perbaikan administrasi atau dokumen klaim terkait peraturan mentri kesehatan yang tidak lengkap"
+#                     }
+#                 },
+#                 "analisa_aturan_coding_medis":{
+#                     "type": "array",
+#                     "description": "Saran-saran atau berupa perintah perbaikan sdministrasi dokumen klaim terkait aturan coding medis yang tidak lengkap",
+#                     "items": {
+#                         "type": "string",
+#                         "description": "Deskripsi saran atau perintah perbaikan administrasi atau dokumen klaim terkait aturan coding medis yang tidak lengkap"
+#                     }
+#                 }
+#             },
+#             "required": ["analisa_aturan_bak", "analisa_aturan_klinis", "analisa_permenkes", "analisa_aturan_coding_medis"]
+#         }
+#     },
+#     "required": ["complete", "incomplete", "improvement_suggestions"]
+# }
 RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS = {
     "type": "object",
     "properties": {
@@ -87,9 +177,13 @@ RESPONSE_SCHEMA_CHECKING_CLAIM_BPJS = {
                 }
             },
             "required": ["analisa_aturan_bak", "analisa_aturan_klinis", "analisa_permenkes", "analisa_aturan_coding_medis"]
+        },
+        "approved_rate": {
+            "type": "number",
+            "description": "Tingkat persetujuan dokumen klaim BPJS Kesehatan. Menggambarkan proporsi berkas yang bebas dari status 'Pending' atau 'Fraud'. Persetase ini dapat di analisa berdasarkan analisa pada document yang complete dan document yang incomplete serta disesuaikan juga dengan improvement suggestions. Semakin sedikit document yang incomplete dan improvement suggestions yang diberikan, maka approved rate akan semakin tinggi. jika semua dokumen lengkap dan tidak ada saran perbaikan, approved rate akan mencapai 100%.",
         }
     },
-    "required": ["complete", "incomplete", "improvement_suggestions"]
+    "required": ["complete", "incomplete", "improvement_suggestions", "approved_rate"]
 }
 
 class KliamBpjsIn(BaseModel):
@@ -100,6 +194,7 @@ class KliamBpjsOut(BaseModel):
     complete: List[str]
     incomplete: Dict[str, List[str]]
     improvement_suggestions: Dict[str, List[str]]
+    approved_rate: float
 
 
 # --- Detailed Pydantic Models for Structured Output ---
